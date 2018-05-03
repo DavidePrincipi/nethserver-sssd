@@ -2,8 +2,5 @@
 use_fully_qualified_names = True
 {
     $OUT = $provider_config;
-    if($provider eq 'ad') {
-       $OUT .= "realmd_tags = manages-system joined-with-samba\n";
-    }
 }
 

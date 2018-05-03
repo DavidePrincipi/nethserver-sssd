@@ -17,7 +17,6 @@
         $provider_config .= "krb5_realm = " . $sssd{'Realm'} . "\n";
         $provider_config .= "krb5_store_password_if_offline = True\n";
         $provider_config .= "ldap_id_mapping = True\n";
-        $provider_config .= "ad_maximum_machine_account_password_age = 0\n";
     }
 
     '';
