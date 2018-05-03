@@ -32,7 +32,7 @@ use Time::Local;
 my %opts;
 my $verbose = 0;
 
-getopts('vu:F:', \%opts);
+getopts('v', \%opts);
 
 if($opts{v}) {
     $verbose = 1;
@@ -46,92 +46,13 @@ if(! $command) {
 }
 
 #
-# test: exec() `net ads testjoin` command and report its exit code
-#
-if($command eq 'test') {
-
-    ! $verbose && open(STDOUT, '>/dev/null');
-    # Use `-k`, kerberos auth, to avoid the password prompt. It seems
-    # the password in secrets.tdb is checked anyway.
-    exec(qw(/usr/bin/net -k ads testjoin)) || die;
-}
-
-#
-# join: exec() `net ads join` and initialize daemons keytabs
-#
-if($command eq 'join') {
-
-    my $user = $opts{u} || get_machine_principal();
-    my $file = $opts{F};
-    my $useKerberos = 0;
-
-    if($file) {
-        open(STDIN, '<', $file) or die("[ERROR] Could not read password file $file: $!\n");
-    } else {
-        $useKerberos = 1;
-    }
-
-    ! $verbose && open(STDOUT, '>/dev/null');
-
-    if($useKerberos) {
-        kerberos_initialize($user);
-    }
-
-    if( ! net_ads_join($useKerberos, $user)) {
-        warn("[ERROR] $0: ADS join failed\n");
-        exit 3;
-    }
-
-    seek(STDIN, 0, SEEK_SET);
-
-    if( ! init_keytabs($useKerberos, $user)) {
-        warn("[ERROR] $0: failed to initialize keytabs\n");
-        exit 4;
-    }
-
-    if($useKerberos) {
-        kerberos_destroy();
-    }
-
-    if( ! refresh_credential_caches($service)) {
-        warn("[ERROR] $0: failed initialize credential caches\n");
-        exit 6;
-    }
-
-    exit 0;
-}
-
-#
-# changepassword: exec() `net ads changetrustpw`
-#
-if($command eq 'changepassword') {
-    my $user = $opts{u} || get_machine_principal();
-
-    ! $verbose && open(STDOUT, '>/dev/null');
-
-    kerberos_initialize($user);
-
-    # Use `-k`, kerberos auth, to avoid the password prompt:
-    system(qw(/usr/bin/net -k ads changetrustpw));
-
-    if( ! init_keytabs(1, get_machine_principal())) {
-        warn("[ERROR] $0: failed to initialize keytabs\n");
-        exit 4;
-    }
-
-    kerberos_destroy();
-
-    exit 0;
-}
-
-#
 # initkeytab
 #
 if($command eq 'initkeytab') {
     my $machine = get_machine_principal();
     ! $verbose && open(STDOUT, '>/dev/null');
     kerberos_initialize($machine);
-    if( ! init_keytabs(1, $machine)) {
+    if( ! init_keytabs()) {
         warn("[ERROR] $0: failed to initialize keytabs\n");
         exit 5;
     }
@@ -140,83 +61,22 @@ if($command eq 'initkeytab') {
 }
 
 
-#
-# tgt: test TGT validity for the given service. If the TGT is expired
-# or is missing request a new one
-#
-if($command eq 'tgt') {
-
-    # Redirect STDOUT to null device if not verbose:
-    if( ! $verbose) {
-        open(STDOUT, '>/dev/null');
-    }
-
-    if( ! refresh_credential_caches($service)) {
-        exit 6;
-    }
-
-    exit 0;
-}
-
-#
-# env: output environment variables to configure kerberos library for a specific service
-#
-if($command eq 'env') {
-    if( ! $service) {
-        die "[ERROR] you must specify a service name\n";
-    }
-
-    my $configDb = esmith::ConfigDB->open_ro;
-
-    if( ! $configDb) {
-        die "[ERROR] could not open ConfigDB\n";
-    }
-
-    my ($ktConfig) = grep { $_->{service} eq $service } read_krb_configs();
-
-    my $ktName = $ktConfig->{kt_path};
-    my $ccName = $ktConfig->{cc_path};
-
-    printf "export KRB5CCNAME='%s'\n", $ccName if($ccName) ;
-    printf "export KRB5_KTNAME='%s'\n", $ktName if($ktName) ;
-
-    exit 0;
-
-}
-
-warn("[ERROR] Usage: $0 [-u username] [-F filename] initkeytab|test|join|changepassword|tgt|env [service]\n");
+warn("[ERROR] Usage: $0 initkeytab\n");
 exit 1;
 
 #
 # SUBROUTINES
 #
 
-sub net_ads_join()
-{
-    my $useKerberos = shift;
-    my $user = shift;
-
-    my %cfg = esmith::ConfigDB->as_hash();
-    my $osName = $cfg{sysconfig}{ProductName} || 'NethServer';
-    my $osVersion = $cfg{sysconfig}{Version} || '1.0';
-
-    my $exitCode = system(qw(/usr/bin/net ads join), $useKerberos ? ('-k') : ('-U', $user), "osName=$osName", "osVer=$osVersion");
-
-    return ($exitCode == 0);
-}
-
 sub init_keytabs()
 {
-    my $useKerberos = shift;
-    my $user = shift;
 
     my @ktConfigs = read_krb_configs();
 
 
     # Initialize the system keytab, by adding required
     # primaries. 'cifs' is always added:
-    my $exitCode = system(qw(/usr/bin/net ads keytab add),
-                          $useKerberos ? ('-k') : ('-U', $user),
+    my $exitCode = system(qw(/usr/bin/net ads keytab add -k),
                           keys %{{map { (map { $_ => 1 } 'cifs', @{$_->{primary}}) } @ktConfigs}}
         );
 
@@ -356,139 +216,6 @@ sub get_machine_principal()
     return $principal;
 }
 
-
-#
-# Get the future status of the TGT, after the given $period has elapsed.
-#
-# 0 = ticket expired
-# 1 = ticket is renewable
-# 2 = ticket is valid
-#
-sub tgt_status
-{
-    my $ccPath = shift;
-    my $period = shift;
-
-    my $cch = Authen::Krb5::cc_resolve('FILE:' . $ccPath);
-    if( ! $cch) {
-        return 0;
-    }
-
-    my $iterator = $cch->start_seq_get();
-
-    if( ! $iterator) {
-        return 0;
-    }
-
-    my $creds;
-
-    while($creds = Authen::Krb5::Ccache::next_cred($cch, $iterator)) {
-        my $server = $creds->server();
-        if($server =~ m{^krbtgt/}) {
-            last;
-        }
-    }
-
-    if( ! defined $creds) {
-        warn "[WARNING] no krbtgt credentials found\n";
-        return 0;
-    }
-
-
-    my $tolerance = int($period * 5 / 100);
-
-    my $now = time();
-
-    my $n = $now + $tolerance;
-    my $d = $now + $period + $tolerance;
-
-    # endtime() will newer exceed renew_till():
-    my $endt = $creds->endtime();
-
-    $cch->end_seq_get($iterator);
-
-    #
-    # now, current time()
-    # P, given period
-    # t, tolerance = 5% of P
-    # n = now + tolerance
-    # d, deadline = now + P + t
-    #
-    # CCCCCCCCBBBBBBBBBBBBBBBBBBBBBBBBBBBBBAAAA
-    # --|----|-----------------------|----|----
-    #  now  n=now+t                  P   d=P+t
-    #
-
-    # case A
-    if($endt > $d) {
-        return 2; # ticket is valid and will be still valid after
-                  # $period. No action needed.
-    }
-
-    # case B
-    if($endt > $n) {
-        return 1; # ticket will not be valid after period, but it can
-                  # be still renewed.
-    }
-
-    # case C
-    return 0; # ticket is not renewable. A new ticket is required.
-
-}
-
-
-sub refresh_credential_caches()
-{
-    my $service = shift;
-    my @cfgs = ();
-
-    if($service) {
-        @cfgs = grep { $_->{service} eq $service } read_krb_configs();
-    } else {
-        @cfgs = read_krb_configs();
-    }
-
-    my $errors = 0;
-    my $principal = get_machine_principal();
-
-    my $ctx = Authen::Krb5::init_context();
-    if( ! $ctx) {
-        warn "[ERROR] failed to initialize krb5 context\n";
-        return 0;
-    }
-
-    # Use the default keytab for machine credentials:
-    delete $ENV{KRB5_KTNAME};
-
-    foreach (@cfgs) {
-        $ENV{KRB5CCNAME} = $_->{cc_path};
-
-        my $val = tgt_status($_->{cc_path}, 3600);
-        my $sname = $_->{service};
-
-        if($val == 1) {
-            print "Renewing kerberos TGT for service $sname\n";
-            system(qw(/usr/bin/kinit -R));
-        } elsif($val == 2) {
-            print "Using valid kerberos TGT for service $sname\n";
-            next;
-        } else {
-            print "Requesting kerberos TGT for service $sname using $principal\n";
-            system(qw(/usr/bin/kinit -k), $principal);
-        }
-
-        if($? != 0) {
-            $errors ++;
-        }
-
-        chown $_->{owner}->uid, -1, $_->{cc_path};
-    }
-
-    return ($errors == 0 ? 1 : 0);
-}
-
-
-
 sub kerberos_initialize($)
 {
     my $user = shift;
@@ -497,7 +224,6 @@ sub kerberos_initialize($)
     system('/usr/bin/kinit', '-k', $user);
     return ($? == 0 ? 1 : 0);
 }
-
 
 sub kerberos_destroy()
 {
