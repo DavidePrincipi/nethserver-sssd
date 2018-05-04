@@ -1,0 +1,12 @@
+[Unit]
+Description=Keytab modifications monitor
+Documentation=https://github.com/NethServer/nethserver-sssd
+After=syslog.target
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/nethserver/keytab-monitor
+Restart=always
+StartLimitBurst=3
+StartLimitInterval=20s

@@ -16,6 +16,7 @@ Requires: krb5-workstation
 Requires: python-tdb
 Requires: tdb-tools
 Requires: php-cli, openldap-clients
+Requires: inotify-tools
 
 %description
 NethServer SSSD configuration
