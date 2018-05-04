@@ -127,7 +127,7 @@ class AdJoinMember extends \Nethgui\Controller\AbstractController  implements \N
         if ($err === 0) {
 
             $this->getLog()->notice("Active Directory domain $realm was joined succesfully!");
-            $this->getLog()->notice("NetBIOS domain name is " . $probead['Workgroup']);
+            $this->getLog()->notice("NetBIOS domain name is " . $probeworkgroup['Workgroup']);
             $configDb->setProp('sssd', array('status' => 'enabled'));
             $this->getPlatform()->signalEvent('nethserver-sssd-save');
 
