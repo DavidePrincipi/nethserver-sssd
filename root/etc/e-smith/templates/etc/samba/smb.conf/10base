@@ -6,7 +6,7 @@ workgroup = { $sssd{'Workgroup'} || 'WORKGROUP' }
 server string = NethServer {$sysconfig{'Version'} . ' ' . $sysconfig{'Release'}} (Samba %v)
 security = { $sssd{'Provider'} eq 'ad' ? 'ADS' : 'user' }
 { $sssd{'Provider'} eq 'ad' ? '' : '# ' }realm = { $sssd{'Realm'} }
-{ $sssd{'Provider'} eq 'ad' ? '' : '# ' }kerberos method = secrets and keytab
+{ $sssd{'Provider'} eq 'ad' ? '' : '# ' }kerberos method = system keytab
 { $sssd{'Provider'} eq 'ad' ? '' : '# ' }password server = {
     use NethServer::SSSD;
     my $sssd_object = NethServer::SSSD->new();
