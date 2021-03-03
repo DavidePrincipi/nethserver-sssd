@@ -312,7 +312,7 @@ For **local AD** provider, this is the manual leave procedure ::
 
 If the machine password or system keytab get corrupted, joining again the DC can fix them: ::
     
-    realm join -U admin $(config getprop sssd Realm)
+    realm join --membership-software=adcli -U admin $(config getprop sssd Realm)
 
 ...at prompt, type the admin's password, then: ::
 
